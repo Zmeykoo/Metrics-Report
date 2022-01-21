@@ -118,8 +118,7 @@ class MetricsReport(BaseReport):
 
             last_month_of_qurter.update({f"Q{quarter} {year}": dateframe.iloc[:, item].sum()})
 
-        print(last_month_of_qurter)
-
+        print(f'Run Rate: {last_month_of_qurter}')
         return last_month_of_qurter
 
     def yoy_growth_per_year(self,quarter_sum):
@@ -159,7 +158,7 @@ class MetricsReport(BaseReport):
             else:
                 diff = round(run_rate[years[i]] / run_rate[prev_year_key] * 100 - 100, 2)
             result.update({years[i]: diff})
-
+        print(f'Yoy per quarter: {result}')
         return result
 
     def yoy_growth(self, data):
@@ -187,7 +186,7 @@ class MetricsReport(BaseReport):
                     if prev_year_key in data and data[prev_year_key] != 0:
                         value = (round(data[data_key] / data[prev_year_key] * 100 - 100, 2))
                 result[data_key] = value
-
+        print(f'Yoy: {result}')
         return result
 
     def main_row(self):
@@ -216,6 +215,7 @@ class MetricsReport(BaseReport):
         per quarter
         New Logo ARR + Upsell ARR
         """
+
         summed_by_month = {}
         for k in self.total_new_bussines_arr_df:
             summed_by_month[k] = sum(self.total_new_bussines_arr_df[k])
@@ -249,6 +249,7 @@ class MetricsReport(BaseReport):
         Dataframe
         Churn ARR
         """
+
         return self.churn_df
 
     def downsell_arr(self):
@@ -442,6 +443,7 @@ class MetricsReport(BaseReport):
             else:
                 value = 0
             result[k] = value
+
         return result
 
     # Part 4
@@ -511,7 +513,10 @@ class MetricsReport(BaseReport):
 
 if __name__ == '__main__':
     fn = 'input.csv'
-    report = MetricsReport(fn)
+    #fn = 'orig.csv'
+    report = MetricsReport(fn, filters=[{'name': 'Var 3', 'op': 'eq', 'val': 'Enterprise'},
+                                        {'name': 'Var 1', 'op': 'eq', 'val': 'North America'}],
+                           date_filters=['03/2018', '04/2018', '05/2018', '06/2018', '07/2018', '08/2018', '09/2018', '10/2018', '11/2018', 'December'])
     ###############################Data
     main_row_data = report.main_row()
     new_logo_arr_data = report.new_logo_arr()
@@ -528,6 +533,7 @@ if __name__ == '__main__':
 
     print('\n\nFirst row')
     run_rate_arr = report.run_rate_arr()
+    print(run_rate_arr)
     yoy_growth_run_rate = report.yoy_growth_per_quarter(run_rate_arr)
     last_quart_run = report.last_quart(run_rate_arr)
     yoy_last_quart_run = report.last_quart(yoy_growth_run_rate)
@@ -632,3 +638,10 @@ if __name__ == '__main__':
     #cac = report.cac(new_logo_arr_quart, magic_num_no_lag, new_logos_calculate, 4)
 
     #print(result)
+    """
+    print(
+        f'\nOrigin\nRun Rate;New;Upsell;Total_Churn\n{run_rate_arr}\n{new_logo_arr_quart}\n{upsell_arr_quart}\n{total_churn_downsell_quart}')
+    print(
+        f'\nLogos\n{new_logos_calculate}\n{upsell_logos_calculate}\n{churn_logos_calculate}\n{downsell_logos_calculate}')
+    print(f'\nAvg:\n{avg_new_logo}\n{avg_upsell}')
+    """

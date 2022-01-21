@@ -50,14 +50,18 @@ class CAC( MetricsReport):
 
         for k in customers_perc:
             d.append(round(top_all_customers.iloc[:int(len(top_all_customers) * (k / 100))].sum() / capital * 100, 2))
-            d_num.append(top_all_customers.iloc[:int(len(top_all_customers) / 100 * k)].sum())
+            d_num.append(round(top_all_customers.iloc[:int(len(top_all_customers) / 100 * k)].sum(), 2))
 
-        result_perc = pd.Series(data=d, index=customers_perc)
-        result_num = pd.Series(data=d_num, index=customers_perc)
+        result_perc = [{'x': k, 'y': v} for k, v in zip(customers_perc, d)]
+        result_num = [{'x': k, 'y': v} for k, v in zip(customers_perc, d_num)]
+
+
+        print(f'Num\n{result_num}')
+        print(f'Percent\n{result_perc}')
+
 
         print(f'Largest customer: {largest_customer}')
-        print(result_num)
-        print(result_num.iloc[0])
+        print(self.transformed_dataframe[self.date_fields])
         return result_perc
 
     def ucr(self):
@@ -67,25 +71,50 @@ class CAC( MetricsReport):
         capital = top_all_customers.sum(axis=0)
         largest_customer = top_all_customers.iloc[0]
         largest_customer_2 = top_all_customers.iloc[1]
+
         impact_1 = round(largest_customer / capital * 100, 2)
         impact_2 = round(largest_customer_2 / capital * 100, 2)
         upsell_1 = round(largest_customer_2 / 100 * 100, 2)
         upsell_2 = round(largest_customer_2 / 100 * 100, 2)
 
+
+        # Creating series
+        customers_perc = [k for k in range(1, 101)]
+        d = []
+        d_num = []
+
+        for k in customers_perc:
+            d.append(round(top_all_customers.iloc[:int(len(top_all_customers) * (k / 100))].sum() / capital * 100, 2))
+            d_num.append(round(top_all_customers.iloc[:int(len(top_all_customers) / 100 * k)].sum(), 2))
+
+        result_perc = [{'x': k, 'y': v} for k, v in zip(customers_perc, d)]
+        result_num = [{'x': k, 'y': v} for k, v in zip(customers_perc, d_num)]
+
+
+        print(f'Num\n{result_num}')
+        print(f'Percent\n{result_perc}')
+
+
+
         print(f'1st largest customer: {largest_customer}')
         print(f'2nd largest customer: {largest_customer_2}')
         print(f'Impact_1st_customer: {impact_1}')
         print(f'Impact_2st_customer: {impact_2}')
-        print(f'ucr:\n{top_all_customers}')
-        return None
+        #print(f'ucr:\n{top_all_customers}')
+        print()
+        return result_perc
 if __name__ == '__main__':
-    fn = 'input.csv'
+    #fn = 'input.csv'
+    fn = 'orig.csv'
     report = CAC(fn)
-
+    """
     top1p = report.top(1, use_percent=True)
     print('\nTop 1%: {}\n'.format(top1p))
     top92p = report.top(92, use_percent=True)
     print('\nTop 92%: {}\n'.format(top92p))
-    ccr = report.ccr()
-    print('\nCCR:\n{}\n'.format(ccr))
+    """
+    #ccr = report.ccr()
+    #print('\nCCR:\n{}\n'.format(ccr))
+
+    print('UCR')
     ucr = report.ucr()

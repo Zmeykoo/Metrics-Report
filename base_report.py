@@ -27,12 +27,15 @@ class BaseReport:
         else:
             return value
 
-    def __init__(self, data_input1_fp, filters=None):
+    def __init__(self, data_input1_fp, filters=None, date_filters=None):
 
         self.started_dataframe = pd.read_csv(data_input1_fp, delimiter=',')
 
         # extract field names
         self.date_fields = [item for item in self.started_dataframe.columns if re.match(self.DATE_PATTERN, item)]
+
+        if date_filters is not None:
+            self.date_fields = [item for item in date_filters if item in self.date_fields]
 
         # list of years
         self.years = set(int(date.split('/')[1]) for date in self.date_fields)
@@ -50,7 +53,7 @@ class BaseReport:
         # Dataframe copy
         self.transformed_dataframe = self.started_dataframe.copy()
 
-        # Filter
+        # Filter vars
         df = self.transformed_dataframe.copy()
         if filters:
             df_columns = df.columns.tolist()
@@ -58,6 +61,7 @@ class BaseReport:
             aggregated_filters = {}
             for i in filters:
                 col = i['name']
+
                 if col not in df_columns:
                     continue
                 value = i['val']
@@ -74,7 +78,10 @@ class BaseReport:
                     df_filters = df_filters & df[col].isin(values)
             df = df[df_filters]
 
+
         self.transformed_dataframe = df
+
+        # Filter date
 
         # Denominator
         shift = self.transformed_dataframe[self.date_fields[:-12]]
@@ -152,10 +159,10 @@ class BaseReport:
                     summed_by_quarter.update({q_name: q_sum})
 
         if period == 'month':
-            #print(f'Summed_by_month: {summed_by_month}')
+            print(f'Summed_by_month: {summed_by_month}')
             return summed_by_month
         if period == 'quarter':
-            #print(f'Quarter sum: {summed_by_quarter}')
+            print(f'Quarter sum: {summed_by_quarter}')
             return summed_by_quarter
 
     def denominator(self):
@@ -202,7 +209,6 @@ class BaseReport:
                         break
                 if q_sum is not None:
                     final.update({q_name: q_sum})
-        print(f'Net Retention:\n{final}')
         return final
 
     def gross_retention(self, denominator):
@@ -263,3 +269,4 @@ class BaseReport:
 
         print(result)
         return result
+
