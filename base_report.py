@@ -1,272 +1,141 @@
 import re
-
 import numpy as np
 import pandas as pd
 
-
 class BaseReport:
-    """
-    Base report class, processing CSV data
-
-    ``data_input1_fp`` -- CSV file path
-    ``filters`` -- for example:
-                   [{'name': 'var3', 'op': 'eq', 'val': 'Enterprise'},
-                    {'name': 'var1', 'op': 'eq', 'val': 'North America'}]
-
-                   There could be multiple items for the same variables.
-                   Those filtering criteria are applied on the dataset, used
-                   for calculations. Only rows where column with specified ``name``
-                   equal to ``val`` will be used.
-    """
     DATE_PATTERN = r"\d{1,2}\/\d{4}"
 
-    @classmethod
-    def _digitize_digit(cls, value):
-        if type(value) == str:
+    def _digitize_digit(self, value):
+        if isinstance(value, str):
             return value.replace(',', '').replace('$', '').replace('%', '')
-        else:
-            return value
+        return value
 
     def __init__(self, data_input1_fp, filters=None, date_filters=None):
-
         self.started_dataframe = pd.read_csv(data_input1_fp, delimiter=',')
 
-        # extract field names
-        self.date_fields = [item for item in self.started_dataframe.columns if re.match(self.DATE_PATTERN, item)]
+        # Extract date fields based on the provided pattern
+        date_fields = [col for col in self.started_dataframe.columns if re.match(self.DATE_PATTERN, col)]
 
-        if date_filters is not None:
-            self.date_fields = [item for item in date_filters if item in self.date_fields]
+        if date_filters:
+            # Filter date fields based on date_filters
+            date_fields = [col for col in date_fields if col in date_filters]
 
-        # list of years
-        self.years = set(int(date.split('/')[1]) for date in self.date_fields)
+        self.date_fields = date_fields
+        self.years = {int(date.split('/')[1]) for date in self.date_fields}
 
-        # Preliminary clean
-        # Nan to 0 transformation
-        self.started_dataframe = self.started_dataframe.replace(np.nan, 0)
-
-        # $ and spaces removal from numeric values
-        self.started_dataframe = self.started_dataframe.applymap(BaseReport._digitize_digit)
-
-        # then to integers(not work)
+        # Preliminary data cleaning
+        self.started_dataframe.fillna(0, inplace=True)
+        self.started_dataframe = self.started_dataframe.applymap(self._digitize_digit)
         self.started_dataframe[self.date_fields] = self.started_dataframe[self.date_fields].astype(float)
 
-        # Dataframe copy
+        # Create a copy of the original dataframe
         self.transformed_dataframe = self.started_dataframe.copy()
 
-        # Filter vars
-        df = self.transformed_dataframe.copy()
         if filters:
-            df_columns = df.columns.tolist()
-            filter_columns = [i['name'] for i in filters]
-            aggregated_filters = {}
-            for i in filters:
-                col = i['name']
+            self.apply_filters(filters)
 
-                if col not in df_columns:
-                    continue
-                value = i['val']
-                if col in aggregated_filters:
-                    aggregated_filters[col].append(value)
-                else:
-                    aggregated_filters[col] = [value]
+    def apply_filters(self, filters):
+        df = self.transformed_dataframe.copy()
+        df_columns = df.columns.tolist()
+        aggregated_filters = {}
 
-            df_filters = None
-            for col, values in aggregated_filters.items():
-                if df_filters is None:
-                    df_filters = df[col].isin(values)
-                else:
-                    df_filters = df_filters & df[col].isin(values)
-            df = df[df_filters]
+        for filter_item in filters:
+            col = filter_item['name']
+            if col in df_columns:
+                value = filter_item['val']
+                aggregated_filters.setdefault(col, []).append(value)
 
+        df_filters = None
+        for col, values in aggregated_filters.items():
+            if df_filters is None:
+                df_filters = df[col].isin(values)
+            else:
+                df_filters &= df[col].isin(values)
 
+        df = df[df_filters]
         self.transformed_dataframe = df
 
-        # Filter date
-
-        # Denominator
-        shift = self.transformed_dataframe[self.date_fields[:-12]]
-        self.denominator_df = shift.set_axis([k for k in self.date_fields[12:]], axis=1, inplace=False)
-
+    def calculate_gross_retention(self):
         # Gross Retention
-        def gross_retention_data(val):
-            """Gross Retention =  min(Data Input 1, Denominator)"""
-            result = val.copy()
-            mainframe = df[val.index].loc[next(myiter)]
+        result = self.transformed_dataframe[self.date_fields].copy()
 
-            for a in range(len(val)):
-                if val[a] > 0:
-                    result[a] = min(val[a], mainframe[a])
-                else:
-                    result[a] = 0
+        for i in range(1, len(result)):
+            mainframe = result.iloc[i - 1]
+            for j in range(len(result.columns)):
+                result.iat[i, j] = min(result.iat[i, j], mainframe[j]) if result.iat[i, j] > 0 else 0
 
-            return result
-
-        # All dateframes
-        df = self.transformed_dataframe[self.date_fields]
-
-        myiter = iter(df.index)
-        self.gross_retention_df = self.denominator_df.apply(gross_retention_data, axis=1)
-
-        # Net Retention
-        def net_retention_data(val):
-            """
-            val = pd.Series()
-            """
-            result = val.copy()
-            mainframe = df[val.index].loc[next(myiter)]
-
-            for a in range(len(val)):
-                if val[a] > 0:
-                    result[a] = mainframe[a]
-                else:
-                    val[a] = 0
-
-            return result
-
-        myiter = iter(df.index)
-        self.net_retention_df = self.denominator_df.apply(net_retention_data, axis=1)
-
-    def root(self, data, period):
-        """
-        Sum of months (columns) in data input.
-        Sum of quarters in data input.
-        """
-
-        # Month to month sum for columns: '1/2018' etc.
-        summed_by_month = {}
-        for item in data.head():#self.date_fields:
-            summed_by_month.update({item: data[item].sum()})
-
-        # Quarters sum
-
-        summed_by_quarter = {}
-        for year in self.years:
-            for quarter in range(0, 4, 1):
-                q_name = f'Q{quarter+1} {year}'
-                q_sum = 0
-                zero = '0'
-                for month_of_quarter in range(1,4,1):
-                    if len(str(month_of_quarter + (quarter*3))) == 1:
-                        key = f'{zero + str(month_of_quarter + (quarter*3) )}/{year}'
-                    else:
-                        key = f'{str(month_of_quarter + (quarter * 3))}/{year}'
-                    if key in summed_by_month:
-                        q_sum += summed_by_month[key]
-                    else:
-                        q_sum = None
-                        break
-                if q_sum is not None:
-                    summed_by_quarter.update({q_name: q_sum})
-
-        if period == 'month':
-            print(f'Summed_by_month: {summed_by_month}')
-            return summed_by_month
-        if period == 'quarter':
-            print(f'Quarter sum: {summed_by_quarter}')
-            return summed_by_quarter
-
-    def denominator(self):
-        """
-        Dataframe
-        Denominator of Retention
-        """
-        return self.denominator_df
-
-    def net_retention(self, denominator):
-        """
-        per quarter
-        Numerator of net retention
-        """
-        #sum
-        delta = {}
-        for item in self.net_retention_df.head():
-            delta.update({item: self.net_retention_df[item].sum()})
-
-        result = {}
-        for k in delta:
-            if denominator[k] > 0:
-                    result[k] = round(delta[k] / denominator[k], 2) * 100
-            else:
-                result[k] = 0
-
-        final = {}
-        years = set(int(date.split('/')[1]) for date in self.net_retention_df.columns)
-        for year in years:
-            for quarter in range(0, 4, 1):
-                q_name = f'Q{quarter+1} {year}'
-                q_sum = 0
-                zero = '0'
-
-                for month_of_quarter in range(1,4,1):
-                    if len(str(month_of_quarter + (quarter*3))) == 1:
-                        key = f'{zero + str(month_of_quarter + (quarter*3) )}/{year}'
-                    else:
-                        key = f'{str(month_of_quarter + (quarter * 3))}/{year}'
-                    if key in result.keys():
-                        q_sum += result[key]
-                    else:
-                        q_sum = None
-                        break
-                if q_sum is not None:
-                    final.update({q_name: q_sum})
-        return final
-
-    def gross_retention(self, denominator):
-        """
-        per quarter
-        Numerator of gross retention
-        """
-        #sum
-        delta1 = {}
-        for item in self.gross_retention_df.head():
-            delta1.update({item: self.gross_retention_df[item].sum()})
-
-        result = {}
-        for k in delta1:
-            if denominator[k] > 0:
-                result[k] = round(round(delta1[k] / denominator[k], 4) * 100, 2)
-            else:
-                result[k] = 0
-
-        final = {}
-        years = set(int(date.split('/')[1]) for date in self.gross_retention_df.columns)
-        for year in years:
-            for quarter in range(0, 4, 1):
-                q_name = f'Q{quarter+1} {year}'
-                q_sum = 0
-                zero = '0'
-
-                for month_of_quarter in range(1,4,1):
-                    if len(str(month_of_quarter + (quarter*3))) == 1:
-                        key = f'{zero + str(month_of_quarter + (quarter*3) )}/{year}'
-                    else:
-                        key = f'{str(month_of_quarter + (quarter * 3))}/{year}'
-                    if key in result.keys():
-                        q_sum += result[key]
-                    else:
-                        q_sum = 'empty'
-                        break
-                if q_sum != 'empty':
-                    final.update({q_name: q_sum})
-
-        return final
-
-    def delta_net_run_rate(self, delta1, delta2):
-        """
-        month or quarter
-        in quarter /run_rate * 100
-        """
-        result = {}
-        for k in delta1:
-            if k in delta2:
-                if delta2[k] > 0:
-                    value = round(delta1[k] / delta2[k] * 100, 2)
-                else:
-                    value = 0
-            else:
-                value = 0
-            result[k] = value
-
-        print(result)
         return result
 
+    def calculate_net_retention(self):
+        # Net Retention
+        result = self.transformed_dataframe[self.date_fields].copy()
+
+        for i in range(1, len(result)):
+            mainframe = result.iloc[i - 1]
+            for j in range(len(result.columns)):
+                result.iat[i, j] = mainframe[j] if result.iat[i, j] > 0 else 0
+
+        return result
+
+    def root(self, data, period):
+        if period == 'month':
+            return data.sum()
+        elif period == 'quarter':
+            result = {}
+            for year in self.years:
+                for quarter in range(4):
+                    q_name = f'Q{quarter + 1} {year}'
+                    quarter_data = data.filter(like=f'Q{quarter + 1} {year}', axis=1)
+                    result[q_name] = quarter_data.values.sum()
+            return result
+
+    def denominator(self):
+        # Denominator
+        return self.transformed_dataframe[self.date_fields[:-12]]
+
+    def net_retention(self, denominator):
+        # Numerator of net retention per quarter
+        delta = self.transformed_dataframe[self.date_fields].sum()
+        result = {}
+        for k, v in delta.items():
+            if denominator[k] > 0:
+                result[k] = round(v / denominator[k] * 100, 2)
+            else:
+                result[k] = 0
+
+        final = {}
+        for year in self.years:
+            for quarter in range(4):
+                q_name = f'Q{quarter + 1} {year}'
+                quarter_data = data.filter(like=q_name, axis=1)
+                final[q_name] = quarter_data.values.sum()
+            return final
+
+    def gross_retention(self, denominator):
+        # Numerator of gross retention per quarter
+        delta = self.calculate_gross_retention().sum()
+        result = {}
+        for k, v in delta.items():
+            if denominator[k] > 0:
+                result[k] = round(v / denominator[k] * 100, 2)
+            else:
+                result[k] = 0
+
+        final = {}
+        for year in self.years:
+            for quarter in range(4):
+                q_name = f'Q{quarter + 1} {year}'
+                quarter_data = data.filter(like=q_name, axis=1)
+                final[q_name] = quarter_data.values.sum()
+            return final
+
+    def delta_net_run_rate(self, delta1, delta2):
+        result = {}
+        for k, v1 in delta1.items():
+            v2 = delta2.get(k, 0)
+            if v2 > 0:
+                result[k] = round(v1 / v2 * 100, 2)
+            else:
+                result[k] = 0
+
+        return result
