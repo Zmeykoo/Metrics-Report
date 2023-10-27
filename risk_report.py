@@ -1,179 +1,108 @@
 import sys
 import os
 import json
-
 import pandas as pd
-from numpy import isnan
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from models import RiskScoreRules
 from metrics_data.base_report import BaseReport
 
-from models import RiskScoreRules, MetricsReportHistory
-
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def take_closest(num, keys):
-    """
-    Given a list of integers, returns number which is is the closest to ``num``.
-    """
-    return min(keys, key=lambda x:abs(x-num))
-
+    """Given a list of integers, returns the number closest to 'num'."""
+    return min(keys, key=lambda x: abs(x - num))
 
 class RiskReport(BaseReport):
-
-    @classmethod
-    def get_score(cls, kind, vv, hv):
-        """
-        Score lookup method for 2d tables.
-
-        ``kind`` -- Risk score type.
-                    For example: "arr_x_growth" or "upsell_x_growth"
-
-        ``vv`` -- 'vertical value', -- a value from last quarter of last year.
-                  For example: 2500000
-
-        ``hv`` -- 'horizontal value', for example: percent of year-over-year growth
-                  or 'gross $ retenion'.
-        """
+    def __init__(self, filename):
+        super().__init__(filename)
+    
+    def get_score(self, kind, vv, hv):
+        """Score lookup method for 2D tables."""
         obj = RiskScoreRules.query.filter_by(kind=kind).one()
         df = pd.read_json(obj.json)
-        row0 = []
-        for row in df.columns.to_list():
-            if row == 'Unnamed: 0':
-                row0.append(None)
-            else:
-                row0.append(int(cls._digitize_digit(row)))
-        rows = [row0]
-        for row in df.to_records():
-            record = []
-            for col in row.tolist()[1:]:
-                if type(col) == str:
-                    record.append(int(cls._digitize_digit(col)))
-                elif isnan(col):
-                    record.append(0)
-                else:
-                    record.append(col)
-            rows.append(record)
+        rows = self._parse_score_table(df)
 
-        result = None
         closest_row = take_closest(vv, [i[0] for i in rows if i[0] is not None])
         closest_column = take_closest(hv, rows[0][1:])
         col_idx = rows[0].index(closest_column)
         result = None
         for row in rows[1:]:
-            if int(cls._digitize_digit(row[0])) == closest_row:
+            if row[0] == closest_row:
                 result = row[col_idx]
                 break
         return result
 
-    @classmethod
-    def get_score_simple(cls, kind, value):
-        """
-        Score lookup function for 2-column tables (without headers)
-
-        ``kind`` -- Risk score type.
-                    For example: "gross_retention" or "net_retention"
-
-        ``value`` -- Value from last quarter of last year.
-                     For example: 2500000
-        """
+    def get_score_simple(self, kind, value):
+        """Score lookup function for 2-column tables (without headers)."""
         obj = RiskScoreRules.query.filter_by(kind=kind).one()
         df = pd.read_json(obj.json)
-        rows = [[int(cls._digitize_digit(i)) for i in df.columns.to_list()]]
-        for _,k, v in df.to_records():
-            rows.append([int(cls._digitize_digit(k)), int(cls._digitize_digit(v))])
+        rows = self._parse_score_table(df)
 
-        result = None
         closest_one = take_closest(value, [i[0] for i in rows])
+        result = None
         for row in rows:
             if row[0] == closest_one:
                 result = row[1]
         return result
 
-    def last_value_yoy(self,value, yoy):
-        """
-        Value and yoy in last quarter in metrics report
-        """
-        #print(f'LAST\n {value}\n{yoy}')
+    def last_value_yoy(self, value, yoy):
+        """Value and YoY in the last quarter of the metrics report."""
         l_key = [*value][-1]
         result = [{l_key: value[l_key]}, {l_key: yoy[l_key]}]
-
-        print(f'\nLast quarter:{result}')
+        print(f'\nLast quarter: {result}')
         return result
 
-    def top(self, size, parametr):
-        """
-        Top customers
-        p - percent of customers
-        n - number of customers
-        """
-        #calculate sum of customer
-        sum_of_customers = {}
-        for i, row in self.started_dataframe.iterrows():
-            total = sum([value for value in row[self.date_fields]])
-            sum_of_customers[self.started_dataframe.iloc[i, 0]] = total
+    def top_customers(self, size, parameter='n'):
+        """Get top customers - 'p' for percent, 'n' for number."""
+        sum_of_customers = self.calculate_total_customers()
 
-        #sorting
-        top_customers = {}
-        sorted_keys = sorted(sum_of_customers, key=sum_of_customers.get).__reversed__()
+        top_customers = self.sort_and_limit_customers(sum_of_customers, size, parameter)
 
-        for key in sorted_keys:
-            top_customers[key] = sum_of_customers[key]
-
-        #print(f'top customers:{top_customers}')
-        if parametr == "p":
-            size = int(len(top_customers) * (size / 100))
-        #print(f'{size}')
-
-        #top size
-        top_size = {}
-        i = 0
-        for key in top_customers.keys():
-            if i == size:
-                break
-            top_size[key] = top_customers[key]
-            i += 1
-        print(f'Num of top customers:{len(top_size)}\nTop {size} customers:{top_size}')
+        print(f'Num of top customers: {len(top_customers)}\nTop {size} customers: {top_customers}')
         return top_customers
 
     def net_retention_removing_largest_upsell(self, net_r):
-        """Net Retention % Removing Largest Upsell"""
-        #the largest upsell
-        all_values = net_r.values()
-        max_value = max(all_values)
+        """Net Retention % Removing Largest Upsell."""
+        max_value = max(net_r.values())
 
-        #remove
-        result = {}
-        for k in net_r:
-            if net_r[k] < max_value:
-                result[k] = net_r[k]
+        result = {k: v for k, v in net_r.items() if v < max_value}
         print(f'\nnet_remov: {result}')
         return result
 
+    def _parse_score_table(self, df):
+        rows = [[self._digitize_digit(i) for i in df.columns.to_list()]]
+        for _, row in df.to_records():
+            record = [self._digitize_digit(col) if not pd.isna(col) else 0 for col in row.tolist()[1:]]
+            rows.append(record)
+        return rows
+
+    def calculate_total_customers(self):
+        sum_of_customers = {}
+        for i, row in self.started_dataframe.iterrows():
+            total = sum(row[self.date_fields])
+            sum_of_customers[self.started_dataframe.iloc[i, 0]] = total
+        return sum_of_customers
+
+    def sort_and_limit_customers(self, sum_of_customers, size, parameter):
+        top_customers = {}
+        sorted_keys = sorted(sum_of_customers, key=sum_of_customers.get, reverse=True)
+
+        if parameter == 'p':
+            size = int(len(top_customers) * (size / 100))
+
+        i = 0
+        for key in sorted_keys:
+            if i == size:
+                break
+            top_customers[key] = sum_of_customers[key]
+            i += 1
+        return top_customers
 
 if __name__ == '__main__':
     fn = 'input.csv'
     kind = "gross_retention"
-    #import pdb;pdb.set_trace()
-    res = RiskReport.get_score_simple(kind, 0)
+    
+    risk_report = RiskReport(fn)
+
+    res = risk_report.get_score_simple(kind, 0)
     print(res)
-    res = RiskReport.get_score_simple(kind, 270.44)
-    #res = RiskReport.get_score(kind, 3825984, 392)
-    #kind = "upsell_x_growth"
-    #res = RiskReport.get_score(kind, 3825984, 392)
-    print(res)
-    sys.exit()
-
-    report = RiskReport(fn)
-
-    denominator_data = report.denominator()
-    denominator = report.root(denominator_data, 'month')
-
-    net_retention = report.net_retention(denominator)
-    net_retention_data = report.net_retention(denominator)
-
-    net_retention_removing_largest_upsell = report.net_retention_removing_largest_upsell(net_retention)
-
-    print('\nTop customers')
-    top = report.top(2)
